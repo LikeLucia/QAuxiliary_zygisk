@@ -1,0 +1,6 @@
+id=zygisk_qauxv
+name=Zygisk QAuxiliary
+version=@VERSION@
+versionCode=@VERSION_CODE@
+author=cinit, QAuxiliary contributors
+description=QAuxiliary — QQ/TIM 增强模块的 Zygisk 注入模式，无需 Xposed 框架。

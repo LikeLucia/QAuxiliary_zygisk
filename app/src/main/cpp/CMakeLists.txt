@@ -121,3 +121,11 @@ add_library(qauxv-dummy SHARED dummy/dummy.cc)
 add_library(qauxv-preload SHARED preload/preload.cc)
 target_link_libraries(qauxv-dummy unwindstack base c ${ANDROID_LIBS})
 target_link_libraries(qauxv-preload unwindstack base c dl ${ANDROID_LIBS})
+
+# ---- Zygisk injector ----
+# arm64 only: Zygisk modules are loaded by the zygote, which is 64-bit on all
+# supported devices. Building it for 32-bit ABIs would only bloat the APK (the
+# resulting .so is excluded from packaging anyway).
+if ("${ANDROID_ABI}" STREQUAL "arm64-v8a")
+    add_subdirectory(zygisk)
+endif ()

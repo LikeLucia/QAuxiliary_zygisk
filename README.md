@@ -20,6 +20,52 @@ QAuxiliary 是一个基于 QNotified 的开源 Xposed 模块
 - Android >= 7.0
 - QQ >= 8.2.0, TIM >= 2.2.0, QQLite >= 4.0, QQ HD >= 5.9.3
 - 在没有 Xposed 环境的系统上，QAuxiliary 也可以通过 Frida 来加载 (需要 root)，参考 [instruction-qauxv-frida.md](./docs/instruction-qauxv-frida.md).
+- 也可以作为 Zygisk 模块运行，无需任何 Xposed 框架 (需要 root)，见下方 [Zygisk 模式](#zygisk-模式).
+
+## Zygisk 模式
+
+除了 LSPosed / Xposed 与 Frida 之外，QAuxiliary 还可以通过 **Zygisk** 直接注入 QQ / TIM 进程，
+**无需安装任何 Xposed 框架**。
+
+### 环境要求
+
+| 项目      | 说明                                                    |
+|-----------|---------------------------------------------------------|
+| Root 方案 | Magisk (启用 Zygisk)、KernelSU 或 APatch (ZygiskNext)   |
+| 架构      | 仅 arm64-v8a                                            |
+
+### 安装
+
+1. 编译产物是**双格式包**：直接安装即为普通的 Xposed 模块 APK；
+   把它改名为 `.zip`，在 Magisk / KernelSU / APatch 中选择「从本地安装」刷入，即为 Zygisk 模块。
+2. 重启设备 (仅当注入器 .so 有变化时；只更新模块本体时重启 QQ / TIM 即可)。
+3. 安装并打开 QAuxiliary 进行功能配置——配置与 LSPosed 模式完全相同，存储在宿主的数据目录中。
+
+### 卸载
+
+在 Magisk / KernelSU / APatch 中卸载 `Zygisk QAuxiliary` 模块并重启即可。
+
+### 注入控制
+
+创建标记文件即可按宿主独立停用注入：
+
+```shell
+# 停用对 QQ 的注入
+touch /data/adb/qauxv/com.tencent.mobileqq.disable
+# 多用户：/data/adb/qauxv/user_<userId>/<宿主包名>.disable
+```
+
+若宿主启动时崩溃或模块未生效，可开启兼容性模式 (改为在 `Application.onCreate` 阶段启动)：
+
+```shell
+touch /data/adb/qauxv/compat.enable
+```
+
+### 注意事项
+
+- **不要同时启用 LSPosed 中的 QAuxiliary**：两种模式共用同一份配置，同时 hook 会造成冲突。
+- 该模式下 DexKit、native 库等能力均由模块自带的加载器提供，与 Xposed 模式行为一致；
+  但模块 APK 的资源与 `META-INF/services` 不可见 (代码由内存中的 dex 加载)。
 
 ## 一切开发旨在学习，请勿用于非法用途
 
@@ -122,6 +168,9 @@ QAuxiliary 将为分 `CI` 和 `推荐的CI` 两个版本
    ```
    去除不使用的 submodule 后，一共有 14 个 submodule, 如果 clone 了很久也没有完成，请检查您的网络以及代理是否配置正确。
 3. 使用 Gradle 编译安装包: `./gradlew :app:assembleDebug` 或者 `./gradlew :app:synthesizeDistReleaseApksCI`;
+4. 如需 Zygisk 模块产物: `./gradlew :app:packageZygiskModule`,
+   输出到 `app/build/outputs/zygisk/QAuxv-zygisk-v<版本>.zip` (同时会生成同目录的 `.apk` 双格式包);
+   也可单独执行 `:app:buildDualApkDebug` 或 `:app:buildDualApkRelease`;
 
 本项目编译环境配置可能比较复杂，如果您在配置环境或者编译过程中遇到任何问题，您可以直接在交流群或 GitHub Issue 中提出，我们会尽快回复。
 

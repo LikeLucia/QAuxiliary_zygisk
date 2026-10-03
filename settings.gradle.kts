@@ -73,6 +73,7 @@ include(
     ":loader:startup",
     ":loader:sbl",
     ":loader:hookapi",
+    ":loader:zygisk",
     ":libs:stub",
     ":libs:ksp",
     ":libs:mmkv",

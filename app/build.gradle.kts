@@ -264,6 +264,10 @@ android {
         if (!isNewXposedApiEnabled) {
             resources.excludes.add("META-INF/xposed/**")
         }
+        // The Zygisk injector is compiled by CMake but must NOT be shipped inside the APK's
+        // lib/ directory: it is only ever loaded by the zygote. The Gradle task
+        // prepareZygiskModule<Variant> stages it as zygisk/arm64-v8a.so in the module instead.
+        jniLibs.excludes += "**/libqauxv-zygisk.so"
     }
 
     buildFeatures {
@@ -321,6 +325,9 @@ dependencies {
     // loader
     compileOnly(projects.loader.hookapi)
     runtimeOnly(projects.loader.sbl)
+    // Zygisk loader: its classes end up in the APK dex, which is exactly what the
+    // Zygisk injector loads into the host process.
+    runtimeOnly(projects.loader.zygisk)
     implementation(projects.loader.startup)
     // ksp
     ksp(projects.libs.ksp)
@@ -621,4 +628,262 @@ afterEvaluate {
             dependsOn("generate${variantName}Proto")
         }
     }
+}
+
+// ── Zygisk module packaging ──────────────────────────────────────────────────
+// Produces a dual-format package: the release APK stays an installable Xposed module,
+// while the same file — renamed to .zip — is a flashable Magisk/KernelSU/APatch module.
+// The module files (customize.sh, module.prop, zygisk/arm64-v8a.so, META-INF/...) are
+// placed at the zip root next to the APK entries; nothing is nested inside.
+
+val zygiskVersionName = android.defaultConfig.versionName
+    ?: error("versionName must be set to package the Zygisk module")
+val zygiskVersionCode = android.defaultConfig.versionCode
+val zygiskLibName = "libqauxv-zygisk.so"
+
+fun resolveSdkDirForZygisk(): File {
+    rootProject.file("local.properties").takeIf { it.exists() }
+        ?.let { f ->
+            Properties().apply { f.inputStream().use { load(it) } }.getProperty("sdk.dir")
+        }
+        ?.trim()?.let { return File(it) }
+    System.getenv("ANDROID_HOME")?.let { return File(it) }
+    System.getenv("ANDROID_SDK_ROOT")?.let { return File(it) }
+    error("Unable to locate the Android SDK: set ANDROID_HOME or sdk.dir in local.properties")
+}
+
+fun registerPrepareZygiskModuleTask(
+    taskName: String,
+    variant: String,
+    stagingDirName: String,
+    objPath: String,
+): TaskProvider<Task> {
+    return tasks.register(taskName) {
+        group = "zygisk"
+        description = "Assembles the Zygisk module directory ($variant)"
+        notCompatibleWithConfigurationCache("stages the Zygisk module")
+        dependsOn("externalNativeBuild${variant.replaceFirstChar { it.uppercase() }}")
+
+        val stageDirProvider = layout.buildDirectory.dir(stagingDirName)
+        val templateDir = layout.projectDirectory.dir("src/main/zygisk-template")
+        val objDirProvider = layout.buildDirectory.dir(objPath)
+        val versionName = zygiskVersionName
+        val versionCode = zygiskVersionCode
+        val libName = zygiskLibName
+        val ndkVersion = android.ndkVersion
+
+        inputs.dir(templateDir)
+        inputs.dir(objDirProvider)
+        outputs.dir(stageDirProvider)
+
+        doLast {
+            // Resolved lazily: failing here only breaks the Zygisk task, not the whole build.
+            val sdkDir = resolveSdkDirForZygisk()
+            val ndkDir = File(sdkDir, "ndk/$ndkVersion")
+            val osName = System.getProperty("os.name")?.lowercase().orEmpty()
+            val osArch = System.getProperty("os.arch")?.lowercase().orEmpty()
+            val hostDir = when {
+                osName.contains("mac") ->
+                    if (osArch.contains("aarch64") || osArch.contains("arm64")) "darwin-arm64"
+                    else "darwin-x86_64"
+                osName.contains("win") -> "windows-x86_64"
+                else -> "linux-x86_64"
+            }
+            val stripExe = File(
+                ndkDir,
+                "toolchains/llvm/prebuilt/$hostDir/bin/llvm-strip" +
+                    if (osName.contains("win")) ".exe" else ""
+            )
+
+            val stageDir = stageDirProvider.get().asFile
+            stageDir.deleteRecursively()
+            stageDir.mkdirs()
+
+            templateDir.asFile.copyRecursively(stageDir)
+            // the installer runs under /system/bin/sh, CRLF would break it
+            stageDir.walkTopDown().forEach { f ->
+                if (f.isFile && f.extension == "sh") {
+                    f.writeText(f.readText(Charsets.UTF_8).replace("\r\n", "\n"), Charsets.UTF_8)
+                }
+            }
+
+            val propFile = File(stageDir, "module.prop")
+            propFile.writeText(
+                propFile.readText()
+                    .replace("@VERSION@", versionName)
+                    .replace("@VERSION_CODE@", versionCode.toString())
+            )
+
+            val candidates = mutableListOf<File>()
+            val stableObj = File(objDirProvider.get().asFile, "arm64-v8a/$libName")
+            if (stableObj.isFile) candidates += stableObj
+            listOf("Debug", "RelWithDebInfo", "Release").forEach { buildType ->
+                File(layout.buildDirectory.get().asFile, "intermediates/cxx/$buildType")
+                    .listFiles()
+                    ?.forEach { hashDir ->
+                        val f = File(hashDir, "obj/arm64-v8a/$libName")
+                        if (f.isFile) candidates += f
+                    }
+            }
+            val objSo = candidates.maxByOrNull { it.lastModified() }
+                ?: error(
+                    "$libName not found (looked in $objPath and intermediates/cxx). " +
+                        "Run externalNativeBuild${variant.replaceFirstChar { it.uppercase() }} first."
+                )
+            if (!stripExe.isFile) {
+                error("NDK llvm-strip not found: $stripExe")
+            }
+
+            val targetSo = File(stageDir, "zygisk/arm64-v8a.so")
+            targetSo.parentFile.mkdirs()
+            val p = ProcessBuilder(
+                stripExe.absolutePath, "-o", targetSo.absolutePath, objSo.absolutePath
+            ).redirectErrorStream(true).start()
+            p.inputStream.bufferedReader().use { r ->
+                r.forEachLine { line -> if (line.isNotBlank()) logger.lifecycle("  $line") }
+            }
+            if (p.waitFor() != 0) {
+                error("llvm-strip failed: ${objSo.absolutePath}")
+            }
+            logger.lifecycle("Zygisk module ($variant) staged at $stageDir")
+        }
+    }
+}
+
+val prepareZygiskModuleRelease = registerPrepareZygiskModuleTask(
+    "prepareZygiskModuleRelease", "release", "zygisk-module-release",
+    "intermediates/cmake/release/obj"
+)
+val prepareZygiskModuleDebug = registerPrepareZygiskModuleTask(
+    "prepareZygiskModuleDebug", "debug", "zygisk-module-debug",
+    "intermediates/cmake/debug/obj"
+)
+
+/**
+ * Merges the staged module files into a signed APK, producing one file that is both an
+ * installable APK and a flashable module zip.
+ */
+fun registerBuildDualApkTask(
+    taskName: String,
+    variant: String,
+    stagingDirName: String,
+    prepareTask: TaskProvider<Task>,
+): TaskProvider<Task> {
+    return tasks.register(taskName) {
+        group = "zygisk"
+        description = "Builds the dual-format package ($variant)"
+        notCompatibleWithConfigurationCache("builds the dual-format APK")
+        dependsOn("package${variant.replaceFirstChar { it.uppercase() }}")
+        dependsOn(prepareTask)
+
+        val srcApkDir = File(project.buildDir, "outputs" + File.separator + "apk" + File.separator + variant)
+        val stageDirProvider = layout.buildDirectory.dir(stagingDirName)
+        val outDir = File(project.buildDir, "outputs" + File.separator + "zygisk")
+        val versionName = zygiskVersionName
+        val outFile = File(outDir, "QAuxv-zygisk-v$versionName-$variant.apk")
+
+        inputs.dir(srcApkDir)
+        inputs.dir(stageDirProvider)
+        outputs.file(outFile)
+
+        val signConfig = android.signingConfigs.findByName(variant)
+        val minSdk = android.defaultConfig.minSdk!!
+
+        doLast {
+            val srcApks = srcApkDir.listFiles()?.filter { it.isFile && it.name.endsWith(".apk") } ?: emptyList()
+            val inputApk = srcApks.singleOrNull()
+                ?: error("expected exactly one APK in $srcApkDir, found ${srcApks.size}")
+            val stageDir = stageDirProvider.get().asFile
+
+            outFile.parentFile.mkdirs()
+            if (outFile.exists()) outFile.delete()
+
+            val options = ZFileOptions().apply {
+                alignmentRule = AlignmentRule { path ->
+                    if (path.endsWith(".so")) {
+                        // 16k alignment for 64-bit ABIs in case of 16k page size devices
+                        if (path.contains("arm64-v8a") || path.contains("x86_64") || path.contains("riscv64")) {
+                            16384
+                        } else {
+                            4096
+                        }
+                    } else {
+                        AlignmentRule.NO_ALIGNMENT
+                    }
+                }
+                noTimestamps = true
+                autoSortFiles = true
+            }
+
+            ZFile.openReadOnly(inputApk).use { srcApk ->
+                ZFiles.apk(outFile, options).use { dstApk ->
+                    if (signConfig != null && signConfig.storeFile != null) {
+                        val keyStore = KeyStore.getInstance(signConfig.storeType ?: KeyStore.getDefaultType())
+                        FileInputStream(signConfig.storeFile!!).use {
+                            keyStore.load(it, signConfig.storePassword!!.toCharArray())
+                        }
+                        val protParam = KeyStore.PasswordProtection(signConfig.keyPassword!!.toCharArray())
+                        val privateKey = keyStore.getEntry(signConfig.keyAlias!!, protParam) as KeyStore.PrivateKeyEntry
+                        val signingOptions = SigningOptions.builder()
+                            .setMinSdkVersion(minSdk)
+                            .setV1SigningEnabled(false)
+                            .setV2SigningEnabled(true)
+                            .setKey(privateKey.privateKey)
+                            .setCertificates(privateKey.certificate as X509Certificate)
+                            .setValidation(SigningOptions.Validation.ASSUME_INVALID)
+                            .build()
+                        SigningExtension(signingOptions).register(dstApk)
+                    } else {
+                        logger.warn("No signing config for '$variant': the dual-format package will be unsigned")
+                    }
+                    // 1. copy every APK entry
+                    srcApk.entries().forEach { entry ->
+                        val cdh = entry.centralDirectoryHeader
+                        val isCompressed = cdh.compressionInfoWithWait.method != CompressionMethod.STORE
+                        dstApk.add(cdh.name, entry.open(), isCompressed)
+                    }
+                    // 2. inject the module files at the zip root
+                    stageDir.walkTopDown().forEach { f ->
+                        if (!f.isFile) return@forEach
+                        val rel = f.relativeTo(stageDir).path.replace('\\', '/')
+                        // .so must stay uncompressed and page-aligned so that the zygote
+                        // can mmap it directly; everything else is fine compressed.
+                        val store = rel.startsWith("zygisk/") && rel.endsWith(".so")
+                        dstApk.add(rel, f.inputStream(), !store)
+                    }
+                    dstApk.update()
+                }
+            }
+            logger.lifecycle("Dual-format package ($variant): $outFile")
+        }
+    }
+}
+
+val buildDualApkRelease = registerBuildDualApkTask(
+    "buildDualApkRelease", "release", "zygisk-module-release", prepareZygiskModuleRelease
+)
+val buildDualApkDebug = registerBuildDualApkTask(
+    "buildDualApkDebug", "debug", "zygisk-module-debug", prepareZygiskModuleDebug
+)
+
+// A plain .zip copy of the dual-format release package, ready to be flashed.
+val packageZygiskModule by tasks.registering {
+    group = "zygisk"
+    description = "Copies the dual-format release package to outputs/zygisk as a .zip"
+    notCompatibleWithConfigurationCache("packages the Zygisk module")
+    dependsOn(buildDualApkRelease)
+
+    val outFile = File(project.buildDir, "outputs/zygisk/QAuxv-zygisk-v$zygiskVersionName.zip")
+    inputs.file(File(project.buildDir, "outputs/zygisk/QAuxv-zygisk-v$zygiskVersionName-release.apk"))
+    outputs.file(outFile)
+
+    doLast {
+        outFile.parentFile.mkdirs()
+        inputs.files.singleFile.copyTo(outFile, overwrite = true)
+        logger.lifecycle("Zygisk module zip: $outFile")
+    }
+}
+
+tasks.named("assemble") {
+    dependsOn(packageZygiskModule)
 }
