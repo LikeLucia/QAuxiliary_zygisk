@@ -61,6 +61,41 @@ touch /data/adb/qauxv/com.tencent.mobileqq.disable
 touch /data/adb/qauxv/compat.enable
 ```
 
+### WebUI 控制 (KernelSU / APatch)
+
+模块内置 WebUI。在 KernelSU / APatch 管理器的模块页点击图标即可打开，
+无需敲命令即可控制：
+
+- **应用作用域** —— 分别开关 5 个宿主 (QQ / QQ 国际版 / QQ 轻聊版 / QQ HD / TIM) 的注入，
+  多用户可按用户切换
+- **兼容模式** —— 对应上面的 `compat.enable`
+- **原生 Hook** —— 按宿主单独开关，见下
+- **日志导出** —— 汇总设备信息、各宿主版本、模块日志与 logcat 到 `Download/`
+
+Magisk 不支持模块 WebUI，会忽略该目录，仍可用上面的标记文件方式控制。
+
+### 原生 Hook (PLT/GOT)
+
+模块包含一个 PLT/GOT hook 引擎，用于在 native 层替换特定导入符号。
+目前内置一项：
+
+| id     | 目标库          | 符号    | 作用                                                |
+|--------|-----------------|---------|-----------------------------------------------------|
+| `key1` | `libfekit.so`   | `fopen` | 把对 `/proc/self/smaps` 的读取重定向到 `/dev/null`  |
+
+只在 QQ / TIM 的 `MSF` 进程安装——反作弊库运行在该进程，且必须抢在它读取
+`/proc` 之前完成打补丁；主进程没有目标库，不会安装。
+
+按宿主单独停用：
+
+```shell
+touch /data/adb/qauxv/com.tencent.mobileqq.key1.disable
+```
+
+新增 hook 只需在 `app/src/main/cpp/zygisk/plt_hook.cpp` 中加一个同签名的替换函数，
+再用 `PLT_HOOK_SPEC` 往 `kDefaultPltHooks` 表追加一行，并在 `webroot/app.js`
+的 `hooks` 数组补一项即可；库发现、GOT 槽位改写、真实符号解析由引擎统一处理。
+
 ### 注意事项
 
 - **不要同时启用 LSPosed 中的 QAuxiliary**：两种模式共用同一份配置，同时 hook 会造成冲突。

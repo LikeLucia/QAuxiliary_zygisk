@@ -17,6 +17,7 @@ add_library(qauxv-zygisk SHARED
         trampoline.cpp
         jni_bridge.cpp
         log_file.cpp
+        plt_hook.cpp
 )
 
 target_compile_features(qauxv-zygisk PRIVATE cxx_std_20)

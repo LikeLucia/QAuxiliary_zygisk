@@ -13,6 +13,7 @@
 #include "jni_bridge.h"
 #include "log.h"
 #include "payload.h"
+#include "plt_hook.h"
 #include "zygisk.hpp"
 
 namespace qauxv {
@@ -151,6 +152,22 @@ public:
             LOGI("preAppSpecialize: compatibility mode enabled via WebUI");
         }
 
+        // 收集本次进程要跳过的 PLT hook：逐个检查 <宿主包名>.<hook id>.disable
+        // 标记文件。真正安装在 postAppSpecialize 进行（目标库那时才可能已加载）。
+        host_package_ = target;
+        disabled_hook_ids_.clear();
+        const PltHookSpec *hook_specs = default_plt_hooks();
+        const std::size_t hook_count = default_plt_hook_count();
+        for (std::size_t i = 0; i < hook_count; ++i) {
+            const std::string marker =
+                    scope_base + "/" + target + "." + hook_specs[i].id + ".disable";
+            if (access(marker.c_str(), F_OK) == 0) {
+                disabled_hook_ids_.push_back(hook_specs[i].id);
+                LOGI("preAppSpecialize: PLT hook %s disabled via WebUI (%s)",
+                     hook_specs[i].id, marker.c_str());
+            }
+        }
+
         int apk_fd = open(SHARED_PAYLOAD_APK, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
         if (apk_fd < 0) {
             LOGE("preAppSpecialize: open %s failed (errno=%d)", SHARED_PAYLOAD_APK, errno);
@@ -209,6 +226,19 @@ public:
 
         // 本地文件日志：目录就绪后初始化
         log_file_init(target_dir + "/log.txt");
+
+        // PLT/GOT hook：只在 MSF 进程安装。QQ 的反作弊库（libfekit.so）运行在
+        // 该进程，且它是唯一需要抢在其读取 /proc 之前打补丁的地方。
+        // 主进程不装：那里没有目标库，只会白跑轮询线程。
+        if (process_name_.size() >= 4 &&
+            process_name_.compare(process_name_.size() - 4, 4, ":MSF") == 0) {
+            if (disabled_hook_ids_.size() >= default_plt_hook_count()) {
+                LOGI("postAppSpecialize: all PLT hooks disabled by user, skip");
+            } else {
+                LOGI("postAppSpecialize: installing PLT hooks in %s", process_name_.c_str());
+                install_default_plt_hooks(disabled_hook_ids_);
+            }
+        }
 
         // 先校验 fd 仍指向 payload：个别实现（如未豁免 fd 的 fork 路径）可能
         // 在 pre 之后把它关掉，此时跳过复制、不 close 可能已被复用的 fd 号，
@@ -336,6 +366,8 @@ private:
     std::string process_name_;
     std::string data_dir_;
     std::string payload_hash_;
+    std::string host_package_;
+    std::vector<std::string> disabled_hook_ids_;
 };
 
 }  // namespace qauxv

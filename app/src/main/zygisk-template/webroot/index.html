@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#f6f7f9">
+    <title>QAuxiliary 作用域</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="page">
+    <header class="topbar">
+        <div class="brand-mark" aria-hidden="true">QA</div>
+        <div>
+            <h1>QAuxiliary</h1>
+            <p>作用域控制 &amp; Hook</p>
+        </div>
+    </header>
+
+    <nav id="user-tabs" class="user-tabs" role="tablist" aria-label="用户" hidden></nav>
+
+    <!-- 应用作用域：由 app.js 按 apps 表渲染，新增宿主只需改一处 -->
+    <section class="scope-section" aria-labelledby="scope-title">
+        <div class="section-heading">
+            <h2 id="scope-title">应用作用域</h2>
+            <span id="scope-count" class="scope-count">正在读取</span>
+        </div>
+
+        <div class="scope-list" id="scope-list" aria-busy="true"></div>
+
+        <div id="error-panel" class="error-panel" hidden>
+            <p id="error-message">读取作用域失败</p>
+            <button id="retry-button" type="button">重新加载</button>
+        </div>
+    </section>
+
+    <!-- 兼容模式 -->
+    <section class="scope-section" aria-labelledby="compat-title">
+        <div class="section-heading">
+            <h2 id="compat-title">兼容模式</h2>
+            <span id="compat-status" class="scope-count">正在读取</span>
+        </div>
+
+        <div class="scope-list" id="compat-list">
+            <label class="scope-item" id="compat-item">
+                <span class="app-icon app-icon-compat">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </span>
+                <span class="app-details">
+                    <strong>兼容模式</strong>
+                    <small>改为在 Application.onCreate 之前挂载，兼容性更好</small>
+                    <small>正常情况下无需开启，仅在注入失败时尝试</small>
+                    <small style="color: red;">开启后如出现功能异常，请先关闭本选项再反馈</small>
+                </span>
+                <span class="switch">
+                    <input type="checkbox" id="compat-input" disabled aria-label="兼容模式">
+                    <span class="switch-track" aria-hidden="true"></span>
+                </span>
+            </label>
+        </div>
+    </section>
+
+    <!-- 原生 Hook -->
+    <section class="scope-section" aria-labelledby="hook-title">
+        <div class="section-heading">
+            <h2 id="hook-title">原生 Hook</h2>
+            <span id="hook-count" class="scope-count">正在读取</span>
+        </div>
+
+        <div class="hook-list" id="hook-list" aria-busy="true"></div>
+    </section>
+
+    <!-- 日志导出 -->
+    <section class="scope-section" aria-labelledby="log-title">
+        <div class="section-heading">
+            <h2 id="log-title">日志导出</h2>
+        </div>
+
+        <div class="log-card">
+            <p class="log-desc">排查问题时导出模块日志，保存至 Download 目录</p>
+            <button id="export-log-button" type="button" class="btn-action">导出日志</button>
+            <p id="export-log-result" class="log-result" aria-live="polite" hidden></p>
+        </div>
+    </section>
+
+    <p class="restart-note">作用域及 Hook 变更将在对应应用下次启动时生效</p>
+    <div id="live-status" class="sr-only" role="status" aria-live="polite"></div>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -19,6 +19,14 @@ ui_print "- Extracting module files"
 unzip -o "$ZIPFILE" 'module.prop' -d "$MODPATH" >&2
 unzip -o "$ZIPFILE" 'uninstall.sh' -d "$MODPATH" >&2
 
+# WebUI (KernelSU / APatch): lets the user toggle host scope and native hooks
+# without touching a shell. Magisk simply ignores this directory.
+if unzip -o "$ZIPFILE" 'webroot/*' -d "$MODPATH" >&2; then
+  ui_print "- WebUI 已安装（KernelSU / APatch 管理器内可见）"
+else
+  ui_print "- 未包含 WebUI，跳过"
+fi
+
 mkdir -p "$MODPATH/zygisk"
 
 ui_print "- Extracting Zygisk library"
@@ -50,6 +58,9 @@ ui_print "- Setting permissions"
 set_perm_recursive "$MODPATH/zygisk" 0 0 0755 0644
 set_perm "$MODPATH/module.prop" 0 0 0644
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
+if [ -d "$MODPATH/webroot" ]; then
+  set_perm_recursive "$MODPATH/webroot" 0 0 0755 0644
+fi
 
 ui_print "- Fixing SELinux contexts"
 chcon -R u:object_r:system_file:s0 "$MODPATH" 2>/dev/null || true
