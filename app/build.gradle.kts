@@ -38,6 +38,7 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.cert.X509Certificate
 import java.util.Locale
+import java.util.Properties
 import java.util.UUID
 
 plugins {
@@ -776,9 +777,9 @@ fun registerBuildDualApkTask(
         dependsOn("package${variant.replaceFirstChar { it.uppercase() }}")
         dependsOn(prepareTask)
 
-        val srcApkDir = File(project.buildDir, "outputs" + File.separator + "apk" + File.separator + variant)
+        val srcApkDir = File(layout.buildDirectory.get().asFile, "outputs" + File.separator + "apk" + File.separator + variant)
         val stageDirProvider = layout.buildDirectory.dir(stagingDirName)
-        val outDir = File(project.buildDir, "outputs" + File.separator + "zygisk")
+        val outDir = File(layout.buildDirectory.get().asFile, "outputs" + File.separator + "zygisk")
         val versionName = zygiskVersionName
         val outFile = File(outDir, "QAuxv-zygisk-v$versionName-$variant.apk")
 
@@ -873,8 +874,8 @@ val packageZygiskModule by tasks.registering {
     notCompatibleWithConfigurationCache("packages the Zygisk module")
     dependsOn(buildDualApkRelease)
 
-    val outFile = File(project.buildDir, "outputs/zygisk/QAuxv-zygisk-v$zygiskVersionName.zip")
-    inputs.file(File(project.buildDir, "outputs/zygisk/QAuxv-zygisk-v$zygiskVersionName-release.apk"))
+    val outFile = File(layout.buildDirectory.get().asFile, "outputs/zygisk/QAuxv-zygisk-v$zygiskVersionName.zip")
+    inputs.file(File(layout.buildDirectory.get().asFile, "outputs/zygisk/QAuxv-zygisk-v$zygiskVersionName-release.apk"))
     outputs.file(outFile)
 
     doLast {
