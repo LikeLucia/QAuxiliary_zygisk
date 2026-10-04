@@ -35,6 +35,12 @@ target_compile_options(qauxv-zygisk PRIVATE
         # The injector deliberately pokes at ART internals; the layout probes are
         # done at runtime, but the casts involved trip these warnings.
         -Wno-invalid-offsetof
+        # zygisk::ModuleBase (from zygisk.hpp) has virtual functions but a
+        # non-virtual destructor. We never delete through a ModuleBase pointer
+        # (the module is a static/global), so this is safe. The top-level
+        # CMakeLists.txt sets -Werror=non-virtual-dtor, override it here.
+        -Wno-non-virtual-dtor
+        -Wno-delete-non-virtual-dtor
 )
 
 target_link_options(qauxv-zygisk PRIVATE
