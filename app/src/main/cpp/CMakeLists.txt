@@ -123,9 +123,15 @@ target_link_libraries(qauxv-dummy unwindstack base c ${ANDROID_LIBS})
 target_link_libraries(qauxv-preload unwindstack base c dl ${ANDROID_LIBS})
 
 # ---- Zygisk injector ----
-# arm64 only: Zygisk modules are loaded by the zygote, which is 64-bit on all
-# supported devices. Building it for 32-bit ABIs would only bloat the APK (the
-# resulting .so is excluded from packaging anyway).
+# The target is always declared so that Gradle can list it in `externalNativeBuild.cmake.targets`
+# without breaking non-arm64 ABIs. On 32-bit ABIs we build an empty stub so the .so exists
+# (it is never packaged — see jniLibs.excludes in build.gradle.kts) and the build does not fail.
 if ("${ANDROID_ABI}" STREQUAL "arm64-v8a")
     add_subdirectory(zygisk)
+else ()
+    # Minimal stub so `ninja qauxv-zygisk` succeeds on 32-bit ABIs.
+    # The resulting .so is excluded from packaging and never loaded.
+    add_library(qauxv-zygisk SHARED zygisk/stub.cpp)
+    target_compile_features(qauxv-zygisk PRIVATE cxx_std_20)
+    target_link_libraries(qauxv-zygisk ${ANDROID_LIBS})
 endif ()

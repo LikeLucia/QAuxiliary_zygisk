@@ -147,6 +147,7 @@ android {
                 cppFlags(*flags)
                 cFlags("-std=c18", *flags)
                 targets += "qauxv-core0"
+                targets += "qauxv-zygisk"
             }
         }
 
